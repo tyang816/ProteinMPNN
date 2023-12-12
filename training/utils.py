@@ -321,12 +321,18 @@ def build_training_clusters(params, debug):
         test_ids = []
  
     # read & clean list.csv
+    # r: CHAINID DEPOSITION RESOLUTION HASH CLUSTER SEQUENCE
     with open(params['LIST'], 'r') as f:
         reader = csv.reader(f)
         next(reader)
-        rows = [[r[0],r[3],int(r[4])] for r in reader
-                if float(r[2])<=params['RESCUT'] and
-                parser.parse(r[1])<=parser.parse(params['DATCUT'])]
+        
+        # rows = [[r[0],r[3],int(r[4])] for r in reader
+        #         if float(r[2])<=params['RESCUT'] and
+        #         parser.parse(r[1])<=parser.parse(params['DATCUT'])]
+        
+        # remove datacut and rescut
+        # CHAINID HASH CLUSTER
+        rows = [[r[0],r[3],int(r[4])] for r in reader]
     
     # compile training and validation sets
     train = {}

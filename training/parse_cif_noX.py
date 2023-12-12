@@ -1,16 +1,18 @@
-import pdbx
-from pdbx.reader.PdbxReader import PdbxReader
-from pdbx.reader.PdbxContainers import DataCategory
+import os,sys
+# current_dir = os.getcwd()
+# sys.path.append(current_dir)
 import gzip
 import numpy as np
 import torch
-import os,sys
 import glob
 import re
-from scipy.spatial import KDTree
-from itertools import combinations,permutations
 import tempfile
 import subprocess
+import argparse
+from scipy.spatial import KDTree
+from tqdm import tqdm
+from itertools import combinations,permutations
+from pdbx.reader.PdbxReader import PdbxReader
 
 RES_NAMES = [
     'ALA','ARG','ASN','ASP','CYS',
@@ -262,22 +264,21 @@ def parseAssemblies(data,chids):
 
 
 def parse_mmcif(filename):
-
-    #print(filename)
-    
     chains = {}   # 'chain_id' -> chain_strucure
-
     # read a gzipped .cif file
     data = []
-    with gzip.open(filename,'rt') as cif:
-        reader = PdbxReader(cif)
-        reader.read(data)
+    if filename.endswith('.gz'):
+        with gzip.open(filename, 'rt') as cif:
+            reader = PdbxReader(cif)
+            reader.read(data)
+    else:
+        with open(filename, 'r') as cif:
+            reader = PdbxReader(cif)
+            reader.read(data)
+
     data = data[0]
 
-    #
     # get sequences
-    #
-    
     # map chain entity to chain ID
     entity_poly = data.getObj('entity_poly')
     if entity_poly is None:
@@ -423,6 +424,11 @@ def parse_mmcif(filename):
         except:
             res = None
     
+    if data.getObj('exptl') is None:
+        method = None
+    else:
+        method = data.getObj('exptl').getValue('method',0).replace(' ','_')
+    
     chids = list(chains.keys())
     seq = []
     for ch in chids:
@@ -432,7 +438,7 @@ def parse_mmcif(filename):
         seq.append([ref_seq,atom_seq])
 
     metadata = {
-        'method'     : data.getObj('exptl').getValue('method',0).replace(' ','_'),
+        'method'     : method,
         'date'       : data.getObj('pdbx_database_status').getValue('recvd_initial_deposition_date',0),
         'resolution' : res,
         'chains'     : chids,
@@ -450,39 +456,59 @@ def parse_mmcif(filename):
 
     return chains, metadata
 
-
-IN = sys.argv[1]
-OUT = sys.argv[2]
-
-chains,metadata = parse_mmcif(IN)
-ID = metadata['id']
-
-tm_pairs = get_tm_pairs(chains)
-if 'chains' in metadata.keys() and len(metadata['chains'])>0:
-    chids = metadata['chains']
-    tm = []
-    for a in chids:
-        tm_a = []
-        for b in chids:
-            tm_ab = tm_pairs[(a,b)]
-            if tm_ab is None:
-                tm_a.append([0.0,0.0,999.9])
-            else:
-                tm_a.append([tm_ab[k] for k in ['tm','seqid','rmsd']])
-        tm.append(tm_a)
-    metadata.update({'tm':tm})
-
-for k,v in chains.items():
-    nres = (v['mask'][:,:3].sum(1)==3).sum()
-    print(">%s_%s %s %s %s %d %d\n%s"%(ID,k,metadata['date'],metadata['method'],
-                                       metadata['resolution'],len(v['seq']),nres,v['seq']))
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-d", "--cif_dir", type=str, default=None)
+    parser.add_argument("-c", "--cif_file", type=str, default=None)
+    parser.add_argument("-o", "--out_dir", type=str, default="data")
+    args = parser.parse_args()
     
-    torch.save({kc:torch.Tensor(vc) if kc!='seq' else str(vc)
-                for kc,vc in v.items()}, f"{OUT}_{k}.pt")
+    os.makedirs(args.out_dir, exist_ok=True)
+    
+    if args.cif_dir is None:
+        assert args.cif_file is not None
+        proteins = [args.cif_file]
+    else:
+        proteins = sorted(glob.glob(os.path.join(args.cif_dir,"*.cif")))
+    proteins_bar = tqdm(proteins)
+    for p in proteins_bar:
+        proteins_bar.set_postfix_str(p)
+        if args.cif_dir is None:
+            chains,metadata = parse_mmcif(p)
+        else:
+            chains,metadata = parse_mmcif(os.path.join(args.cif_dir,p))
+        
+        ID = metadata['id']
 
-meta_pt = {}
-for k,v in metadata.items():
-    if "asmb_xform" in k or k=="tm":
-        v = torch.Tensor(v)
-    meta_pt.update({k:v})
-torch.save(meta_pt, f"{OUT}.pt")
+        tm_pairs = get_tm_pairs(chains)
+        if 'chains' in metadata.keys() and len(metadata['chains'])>0:
+            chids = metadata['chains']
+            tm = []
+            for a in chids:
+                tm_a = []
+                for b in chids:
+                    tm_ab = tm_pairs[(a,b)]
+                    if tm_ab is None:
+                        tm_a.append([0.0,0.0,999.9])
+                    else:
+                        tm_a.append([tm_ab[k] for k in ['tm','seqid','rmsd']])
+                tm.append(tm_a)
+            metadata.update({'tm':tm})
+        
+        name = p.split("/")[-1].split(".")[0]
+        for k,v in chains.items():
+            nres = (v['mask'][:,:3].sum(1)==3).sum()
+            print(">%s_%s %s %s %s %d %d\n%s"%(ID,k,metadata['date'],metadata['method'],
+                                            metadata['resolution'],len(v['seq']),nres,v['seq']))
+            
+            torch.save({kc:torch.Tensor(vc) if kc!='seq' else str(vc)
+                        for kc,vc in v.items()}, os.path.join(args.out_dir,f"{name}_{k}.pt"))
+
+        meta_pt = {}
+        for k,v in metadata.items():
+            if "asmb_xform" in k or k=="tm":
+                v = torch.Tensor(v)
+            meta_pt.update({k:v})
+        
+        torch.save(meta_pt, os.path.join(args.out_dir,f"{name}.pt"))
+
