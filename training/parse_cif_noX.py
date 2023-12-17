@@ -429,6 +429,11 @@ def parse_mmcif(filename):
     else:
         method = data.getObj('exptl').getValue('method',0).replace(' ','_')
     
+    if data.getObj('entry') is None:
+        entry = filename.split('/')[-1].split('.')[0]
+    else:
+        entry = data.getObj('entry').getValue('id',0)
+    
     chids = list(chains.keys())
     seq = []
     for ch in chids:
@@ -443,7 +448,7 @@ def parse_mmcif(filename):
         'resolution' : res,
         'chains'     : chids,
         'seq'        : seq,
-        'id'         : data.getObj('entry').getValue('id',0)
+        'id'         : entry
     }
     
 
@@ -473,11 +478,7 @@ if __name__ == "__main__":
     proteins_bar = tqdm(proteins)
     for p in proteins_bar:
         proteins_bar.set_postfix_str(p)
-        if args.cif_dir is None:
-            chains,metadata = parse_mmcif(p)
-        else:
-            chains,metadata = parse_mmcif(os.path.join(args.cif_dir,p))
-        
+        chains,metadata = parse_mmcif(p)
         ID = metadata['id']
 
         tm_pairs = get_tm_pairs(chains)

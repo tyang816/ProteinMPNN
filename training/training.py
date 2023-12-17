@@ -18,6 +18,7 @@ def main(args):
     import subprocess
     from concurrent.futures import ProcessPoolExecutor    
     from utils import worker_init_fn, get_pdbs, loader_pdb, build_training_clusters, PDB_dataset, StructureDataset, StructureLoader
+    from utils import build_dataset_from_split_file
     from model_utils import featurize, loss_smoothed, loss_nll, get_std_opt, ProteinMPNN
 
     scaler = torch.cuda.amp.GradScaler()
@@ -42,16 +43,16 @@ def main(args):
         with open(logfile, 'w') as f:
             f.write('Epoch\tTrain\tValidation\n')
 
-    data_path = args.path_for_training_data
-    params = {
-        "LIST"    : f"{data_path}/list.csv", 
-        "VAL"     : f"{data_path}/valid_clusters.txt",
-        "TEST"    : f"{data_path}/test_clusters.txt",
-        "DIR"     : f"{data_path}",
-        # "DATCUT"  : "2030-Jan-01",
-        # "RESCUT"  : args.rescut, #resolution cutoff for PDBs
-        "HOMO"    : 0.70 #min seq.id. to detect homo chains
-    }
+    # data_path = args.path_for_training_data
+    # params = {
+    #     "LIST"    : f"{data_path}/list.csv", 
+    #     "VAL"     : f"{data_path}/valid_clusters.txt",
+    #     "TEST"    : f"{data_path}/test_clusters.txt",
+    #     "DIR"     : f"{data_path}",
+    #     "DATCUT"  : "2030-Jan-01",
+    #     "RESCUT"  : args.rescut, #resolution cutoff for PDBs
+    #     "HOMO"    : 0.70 #min seq.id. to detect homo chains
+    # }
 
 
     LOAD_PARAM = {'batch_size': 1,
@@ -65,11 +66,12 @@ def main(args):
         args.max_protein_length = 1000
         args.batch_size = 1000
 
-    train, valid, test = build_training_clusters(params, args.debug)
+    # train, valid, test = build_training_clusters(params, args.debug)
+    train, valid, test = build_dataset_from_split_file(args.path_for_training_data, args.path_for_target_protein)
      
-    train_set = PDB_dataset(list(train.keys()), loader_pdb, train, params)
+    train_set = PDB_dataset(list(train.keys()), loader_pdb, train, args.path_for_training_data, args.path_for_target_protein)
     train_loader = torch.utils.data.DataLoader(train_set, worker_init_fn=worker_init_fn, **LOAD_PARAM)
-    valid_set = PDB_dataset(list(valid.keys()), loader_pdb, valid, params)
+    valid_set = PDB_dataset(list(valid.keys()), loader_pdb, valid, args.path_for_training_data, args.path_for_target_protein)
     valid_loader = torch.utils.data.DataLoader(valid_set, worker_init_fn=worker_init_fn, **LOAD_PARAM)
 
 
@@ -227,7 +229,8 @@ def main(args):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    argparser.add_argument("--path_for_training_data", type=str, default="my_path/pdb_2021aug02", help="path for loading training data") 
+    argparser.add_argument("--path_for_training_data", type=str, default="my_path/pdb_2021aug02", help="path for loading training data")
+    argparser.add_argument("--path_for_target_protein", type=str, default="my_path/target_protein", help="path for loading target protein")
     argparser.add_argument("--path_for_outputs", type=str, default="./exp_020", help="path for logs and model weights")
     argparser.add_argument("--previous_checkpoint", type=str, default="", help="path for previous model weights, e.g. file.pt")
     argparser.add_argument("--num_epochs", type=int, default=200, help="number of epochs to train for")
@@ -243,9 +246,9 @@ if __name__ == "__main__":
     argparser.add_argument("--dropout", type=float, default=0.1, help="dropout level; 0.0 means no dropout")
     argparser.add_argument("--backbone_noise", type=float, default=0.2, help="amount of noise added to backbone during training")   
     argparser.add_argument("--rescut", type=float, default=3.5, help="PDB resolution cutoff")
-    argparser.add_argument("--debug", type=bool, default=False, help="minimal data loading for debugging")
+    argparser.add_argument("--debug", action="store_true", help="minimal data loading for debugging")
     argparser.add_argument("--gradient_norm", type=float, default=-1.0, help="clip gradient norm, set to negative to omit clipping")
-    argparser.add_argument("--mixed_precision", type=bool, default=True, help="train with mixed precision")
+    argparser.add_argument("--mixed_precision", action="store_true", help="train with mixed precision")
  
     args = argparser.parse_args()    
     main(args)   

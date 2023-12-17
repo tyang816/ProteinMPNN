@@ -6,6 +6,7 @@ import numpy as np
 import time
 import random
 import os
+import json
 
 class StructureDataset():
     def __init__(self, pdb_dict_list, verbose=True, truncate=None, max_length=100,
@@ -209,11 +210,11 @@ def get_pdbs(data_loader, repeat=1, max_length=10000, num_units=1000000):
 
 
 class PDB_dataset(torch.utils.data.Dataset):
-    def __init__(self, IDs, loader, train_dict, params):
+    def __init__(self, IDs, loader, train_dict, train_dir, target_protein_dir=None):
         self.IDs = IDs
         self.train_dict = train_dict
         self.loader = loader
-        self.params = params
+        self.train_dir, self.target_protein_dir = train_dir, target_protein_dir
 
     def __len__(self):
         return len(self.IDs)
@@ -221,15 +222,17 @@ class PDB_dataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         ID = self.IDs[index]
         sel_idx = np.random.randint(0, len(self.train_dict[ID]))
-        out = self.loader(self.train_dict[ID][sel_idx], self.params)
+        out = self.loader(self.train_dict[ID][sel_idx], self.train_dir, self.target_protein_dir)
         return out
 
 
 
-def loader_pdb(item,params):
+def loader_pdb(item, train_dir, target_protein_dir=None):
 
     pdbid,chid = item[0].split('_')
-    PREFIX = "%s/pdb/%s/%s"%(params['DIR'],pdbid[1:3],pdbid)
+    PREFIX = f"{train_dir}/process/{pdbid}"
+    if not os.path.isfile(PREFIX+".pt") and target_protein_dir is not None:
+        PREFIX = f"{target_protein_dir}/process/{pdbid}"
     
     # load metadata
     if not os.path.isfile(PREFIX+".pt"):
@@ -240,8 +243,11 @@ def loader_pdb(item,params):
     chids = np.array(meta['chains'])
 
     # find candidate assemblies which contain chid chain
-    asmb_candidates = set([a for a,b in zip(asmb_ids,asmb_chains)
-                           if chid in b.split(',')])
+    try:
+        asmb_candidates = set([a for a,b in zip(asmb_ids,asmb_chains)
+                            if chid in b.split(',')])
+    except:
+        asmb_candidates = {}
 
     # if the chains is missing is missing from all the assemblies
     # then return this chain alone
@@ -287,11 +293,16 @@ def loader_pdb(item,params):
                 asmb.update({(c,k,i):xyz_i for i,xyz_i in enumerate(xyz_ru)})
             except KeyError:
                 return {'seq': np.zeros(5)}
-
-    # select chains which share considerable similarity to chid
-    seqid = meta['tm'][chids==chid][0,:,1]
-    homo = set([ch_j for seqid_j,ch_j in zip(seqid,chids)
-                if seqid_j>params['HOMO']])
+    try:
+        # select chains which share considerable similarity to chid
+        seqid = meta['tm'][chids==chid][0,:,1]
+    except Exception as e:
+        print(e)
+        print(meta['tm'])
+        print(chids)
+        print("Error in loading pdb: ", item[0])
+    # defalut threshold is 0.7
+    homo = set([ch_j for seqid_j,ch_j in zip(seqid,chids) if seqid_j> 0.7])
     # stack all chains in the assembly together
     seq,xyz,idx,masked = "",[],[],[]
     seq_list = []
@@ -359,4 +370,37 @@ def build_training_clusters(params, debug):
                 train[r[2]] = [r[:2]]
     if debug:
         valid=train       
+    return train, valid, test
+
+
+def build_dataset_from_split_file(train_dir, target_protein_dir=None):
+    train, valid, test = {}, {}, {}
+    split_file = os.path.join(train_dir, "split.json")
+    split_dic = json.load(open(split_file))
+    fake_cluster_id = 0
+    for pdb in split_dic['train']:
+        pdb = pdb.replace(".", "_")
+        train[fake_cluster_id] = [[pdb]]
+        fake_cluster_id += 1
+    train_fake_cluster_id = fake_cluster_id
+    if target_protein_dir is not None:
+        # only contains train and valid
+        target_split_file = os.path.join(target_protein_dir, "split.json")
+        target_split_dic = json.load(open(target_split_file))
+        for pdb in target_split_dic['train']:
+            train[train_fake_cluster_id] = [[pdb]]
+            train_fake_cluster_id += 1
+        for pdb in target_split_dic['valid']:
+            valid[fake_cluster_id] = [[pdb]]
+            fake_cluster_id += 1
+    else:
+        for pdb in split_dic['validation']:
+            pdb = pdb.replace(".", "_")
+            valid[fake_cluster_id] = [[pdb]]
+            fake_cluster_id += 1
+        for pdb in split_dic['test']:
+            pdb = pdb.replace(".", "_")
+            test[fake_cluster_id] = [[pdb]]
+            fake_cluster_id += 1
+        
     return train, valid, test
