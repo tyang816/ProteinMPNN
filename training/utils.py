@@ -222,7 +222,12 @@ class PDB_dataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         ID = self.IDs[index]
         sel_idx = np.random.randint(0, len(self.train_dict[ID]))
-        out = self.loader(self.train_dict[ID][sel_idx], self.train_dir, self.target_protein_dir)
+        out = None
+        try:
+            out = self.loader(self.train_dict[ID][sel_idx], self.train_dir, self.target_protein_dir)
+        except:
+            with open("error_pdb.txt", "a") as f:
+                f.write(str(ID) + "\n")
         return out
 
 
@@ -293,14 +298,10 @@ def loader_pdb(item, train_dir, target_protein_dir=None):
                 asmb.update({(c,k,i):xyz_i for i,xyz_i in enumerate(xyz_ru)})
             except KeyError:
                 return {'seq': np.zeros(5)}
-    try:
-        # select chains which share considerable similarity to chid
-        seqid = meta['tm'][chids==chid][0,:,1]
-    except Exception as e:
-        print(e)
-        print(meta['tm'])
-        print(chids)
-        print("Error in loading pdb: ", item[0])
+            
+    # select chains which share considerable similarity to chid
+    seqid = meta['tm'][chids==chid][0,:,1]
+
     # defalut threshold is 0.7
     homo = set([ch_j for seqid_j,ch_j in zip(seqid,chids) if seqid_j> 0.7])
     # stack all chains in the assembly together

@@ -68,10 +68,13 @@ def main(args):
 
     # train, valid, test = build_training_clusters(params, args.debug)
     train, valid, test = build_dataset_from_split_file(args.path_for_training_data, args.path_for_target_protein)
-     
-    train_set = PDB_dataset(list(train.keys()), loader_pdb, train, args.path_for_training_data, args.path_for_target_protein)
+    train_error_pdbs = [p.strip() for p in open("train_error_pdb.txt", "r").readlines()]
+    train_list = [p for p in list(train.keys()) if str(p) not in train_error_pdbs]
+    train_set = PDB_dataset(train_list, loader_pdb, train, args.path_for_training_data, args.path_for_target_protein)
+    print(f">>> train set num {len(train_set)}")
     train_loader = torch.utils.data.DataLoader(train_set, worker_init_fn=worker_init_fn, **LOAD_PARAM)
     valid_set = PDB_dataset(list(valid.keys()), loader_pdb, valid, args.path_for_training_data, args.path_for_target_protein)
+    print(f">>> valid set num {len(valid_set)}")
     valid_loader = torch.utils.data.DataLoader(valid_set, worker_init_fn=worker_init_fn, **LOAD_PARAM)
 
 

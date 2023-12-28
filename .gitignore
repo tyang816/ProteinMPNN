@@ -129,3 +129,7 @@ dmypy.json
 .pyre/
 
 training/dataset/
+
+tmp.ipynb
+*.csv
+training/checkpoint/
